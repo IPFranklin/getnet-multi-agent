@@ -19,7 +19,7 @@ from langchain_core.tools import BaseTool
 from app.observability import TOOL_CALLS, log_event, record_usage
 
 logger = logging.getLogger(__name__)
-EVIDENCE_CHARS = 1500  # tool output kept per call for traces / eval judge (not sent to customers)
+EVIDENCE_CHARS = 4000  # tool output kept per call for traces / eval judge (not sent to customers)
 
 
 def message_text(msg: BaseMessage) -> str:

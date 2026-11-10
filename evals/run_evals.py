@@ -34,6 +34,8 @@ JUDGE_PROMPT = """You are grading a customer-support answer for Getnet (payments
 Question: {question}
 Answer: {answer}
 Sources listed to the customer (ref = the [n] used in the answer): {sources}
+Earlier turns of this conversation (the assistant may rely on them):
+{history}
 Evidence the assistant actually received from its tools (retrieved passages, account data, API results):
 {evidence}
 Score 1-5 for RELEVANCE (does it answer the question?) and FAITHFULNESS (every factual claim is supported by
@@ -52,19 +54,26 @@ def _session(case: dict, run_id: str) -> str:
 
 async def run_case_inprocess(orchestrator, case: dict, run_id: str) -> dict:
     # Multi-turn cases: earlier turns ("turns") are sent first in the same session, then the scored message.
+    history = []
     for turn in case.get("turns", []):
-        await orchestrator.handle(turn, case["user_id"], session_id=_session(case, run_id))
-    return await orchestrator.handle(case["message"], case["user_id"], session_id=_session(case, run_id))
+        prev = await orchestrator.handle(turn, case["user_id"], session_id=_session(case, run_id))
+        history.append({"user": turn, "assistant": prev.get("response", "")})
+    out = await orchestrator.handle(case["message"], case["user_id"], session_id=_session(case, run_id))
+    return {**out, "_history": history}
 
 
 async def run_case_http(client: httpx.AsyncClient, url: str, case: dict, run_id: str) -> dict:
-    out: dict = {}
-    for msg in [*case.get("turns", []), case["message"]]:
+    async def send(msg: str) -> dict:
         resp = await client.post(f"{url}/chat", json={"message": msg, "user_id": case["user_id"],
                                                       "session_id": _session(case, run_id)})
         resp.raise_for_status()
-        out = resp.json()
-    return out
+        return resp.json()
+
+    history = []
+    for turn in case.get("turns", []):
+        prev = await send(turn)
+        history.append({"user": turn, "assistant": prev.get("response", "")})
+    return {**await send(case["message"]), "_history": history}
 
 
 def score_case(case: dict, out: dict) -> dict:
@@ -86,6 +95,7 @@ def score_case(case: dict, out: dict) -> dict:
         "answer": answer,
         "sources": out.get("sources", []),
         "evidence": out.get("evidence", []),
+        "history": out.get("_history", []),
     }
 
 
@@ -95,7 +105,8 @@ async def judge(model, case: dict, result: dict) -> dict:
     evidence = "\n\n".join(f"<{e['tool']}>\n{e['output']}" for e in result.get("evidence", [])) or "(none returned)"
     prompt = JUDGE_PROMPT.format(question=case["message"], answer=result["answer"][:3000],
                                  sources=json.dumps(result["sources"], ensure_ascii=False)[:2000],
-                                 evidence=evidence[:8000])
+                                 evidence=evidence[:12000],
+                                 history=json.dumps(result.get("history", []), ensure_ascii=False)[:4000] or "(none)")
     msg = await model.ainvoke([HumanMessage(content=prompt)])
     text = msg.content if isinstance(msg.content, str) else "".join(b.get("text", "") for b in msg.content if isinstance(b, dict))
     try:
