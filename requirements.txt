@@ -17,5 +17,6 @@ pypdf==6.17.0
 PyYAML==6.0.3
 # Tools / infra
 httpx==0.28.1
+tzdata==2026.6  # IANA time zones for zoneinfo on Windows (no system tz database there)
 ddgs==9.16.1
 prometheus-client==0.26.0
