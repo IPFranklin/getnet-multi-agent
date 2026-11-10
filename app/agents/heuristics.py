@@ -11,13 +11,23 @@ import re
 
 from app.guardrails import normalize
 
-_PT = {"que", "como", "minha", "meu", "nao", "voce", "qual", "quando", "posso", "preciso", "maquininha",
-       "vendas", "dinheiro", "obrigado", "ola", "oi", "esta", "estou", "da", "do", "para", "cair", "hoje", "ontem"}
-_ES = {"como", "mi", "cuando", "puedo", "necesito", "dinero", "ventas", "gracias", "hola", "esta", "maquina", "ayer", "hoy", "el", "los"}
-_EN = {"help", "hi", "hello", "hey", "the", "what", "how", "my", "when", "can", "do", "is", "will", "does", "i", "you", "from", "yesterday", "today", "with"}
+_PT = {"que", "como", "minha", "meu", "minhas", "meus", "nao", "voce", "qual", "quando", "quanto", "posso",
+       "preciso", "maquininha", "vendas", "dinheiro", "obrigado", "ola", "oi", "esta", "estou", "da", "do", "das",
+       "dos", "para", "cair", "cai", "caiu", "hoje", "ontem", "eu", "recebi", "receber", "vou", "uma", "um",
+       "escreva", "sobre", "quem", "ganhou", "porque", "por", "isso", "tem", "sao", "conta", "entre",
+       "diferenca", "e", "o", "os", "as", "ativo", "ativar"}
+_ES = {"como", "mi", "cuando", "puedo", "necesito", "dinero", "ventas", "gracias", "hola", "esta", "maquina",
+       "ayer", "hoy", "el", "los", "las", "cuanto", "recibi", "escribe", "sobre", "quien", "gano", "mis", "por"}
+_EN = {"help", "hi", "hello", "hey", "the", "what", "how", "my", "when", "can", "do", "is", "will", "does", "i",
+       "you", "from", "yesterday", "today", "with", "an", "about", "of", "to", "for", "write", "who", "won",
+       "why", "which", "where", "did", "receive", "received", "money", "sales", "machine", "please", "me"}
 
 
 def detect_language(text: str) -> str:
+    """Cheap language guess used only when the LLM router is unavailable.
+
+    Falls back to Portuguese (the main market) only when no word is recognised at all.
+    """
     words = set(re.findall(r"[a-z]+", normalize(text)))
     scores = {"pt": len(words & _PT), "es": len(words & _ES) - 0.5, "en": len(words & _EN)}
     lang = max(scores, key=scores.get)
@@ -36,6 +46,11 @@ SUPPORT_TERMS = [
     r"\b(won'?t connect|not connecting|n[aã]o conecta|sem internet|offline|n[aã]o liga|won'?t turn on)\b",
     r"\b(decline|declined|recusad|negad|rechazad|error code|c[oó]digo de erro|erro\b|error\b)",
     r"\b(yesterday'?s sales|vendas de ontem|vendas de hoje|today'?s sales)\b",
+    # receivables asked without "my"/"minha" (found in manual testing: "Quanto vou receber hoje?")
+    r"\b(quanto|o que) (eu )?(recebi|vou receber|tenho a receber|caiu|cai)\b",
+    r"\b(recebi|vou receber|a receber)\b.*\b(hoje|ontem|amanha|semana|mes)\b",
+    r"\b(what|how much) (did|will) i (receive|get paid|be paid)\b",
+    r"\b(cuanto|que) (recibi|voy a recibir)\b",
 ]
 UNSUPPORTED_TERMS = [
     r"\b(poem|poema|poesia|homework|li[cç][aã]o de casa|tarefa escolar|write (me )?(a |an )?(essay|story|code|song)|"

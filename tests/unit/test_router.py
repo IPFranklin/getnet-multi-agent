@@ -18,6 +18,12 @@ EXAMPLES = [
     ("Quero falar com um atendente", "escalation"),
     ("Tem uma venda que eu não reconheço, acho que é fraude", "escalation"),
     ("Escreva um poema sobre gatos", "unsupported"),
+    # Regressions found in manual testing (Portuguese receivables questions without "minha"/"my")
+    ("Quando cai o dinheiro das vendas de ontem?", "support"),
+    ("Quanto vou receber hoje?", "support"),
+    ("Quanto eu recebi ontem?", "support"),
+    ("What did I receive yesterday?", "support"),
+    ("Como funciona a antecipação de recebíveis?", "knowledge"),
 ]
 
 
@@ -32,7 +38,10 @@ def test_vague_message_asks_for_clarification():
 
 
 @pytest.mark.parametrize("text,lang", [("Quando vou receber minhas vendas?", "pt"), ("When will I get paid?", "en"),
-                                       ("¿Cuándo recibo el dinero de mis ventas?", "es")])
+                                       ("¿Cuándo recibo el dinero de mis ventas?", "es"),
+                                       # regressions: used to default to "pt"
+                                       ("Write a poem about cats", "en"), ("Who won the 2022 World Cup?", "en"),
+                                       ("Qual a diferença entre a Get Clássica e a Get Smart?", "pt")])
 def test_language_detection(text, lang):
     assert detect_language(text) == lang
 
