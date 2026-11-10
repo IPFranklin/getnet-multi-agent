@@ -1,0 +1,46 @@
+services:
+  api:
+    build:
+      context: .
+      args:
+        PRELOAD_EMBEDDINGS: "true"
+    image: getnet-multi-agent:latest
+    container_name: getnet-multi-agent
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-fastembed}
+      LLM_PROVIDER: ${LLM_PROVIDER:-fake}
+    volumes:
+      - agent-data:/app/data/runtime   # tickets & handoffs survive restarts
+      - agent-index:/app/data/index    # built knowledge index
+    restart: unless-stopped
+
+  # One-off: rebuild the index crawling the live Getnet URLs
+  #   docker compose run --rm ingest
+  ingest:
+    image: getnet-multi-agent:latest
+    profiles: ["tools"]
+    env_file:
+      - path: .env
+        required: false
+    command: ["python", "-m", "app.rag.ingest", "--crawl"]
+    volumes:
+      - agent-index:/app/data/index
+
+  # Run the test-suite inside the image: docker compose run --rm tests
+  tests:
+    image: getnet-multi-agent:latest
+    profiles: ["tools"]
+    environment:
+      LLM_PROVIDER: fake
+      EMBEDDING_BACKEND: hash
+    command: ["sh", "-c", "pip install -q pytest pytest-asyncio respx >/dev/null && python -m pytest -q"]
+    user: root
+
+volumes:
+  agent-data:
+  agent-index:

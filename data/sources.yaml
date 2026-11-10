@@ -1,0 +1,28 @@
+# Live sources crawled when INGEST_CRAWL=true (or `python -m app.rag.ingest --crawl`).
+# The curated markdown in data/knowledge_base/ is always ingested, so the system works even
+# if a site blocks scraping or renders content with JavaScript.
+sources:
+  # --- Getnet global (suggested source) --------------------------------------------------
+  - {url: "https://www.getnet.net/en", tags: [institucional, global], language: en}
+  - {url: "https://www.getnet.net/en/our-solutions/in-person-payments", tags: [institucional, global], language: en}
+  - {url: "https://www.getnet.net/en/our-solutions/online-payments", tags: [institucional, global], language: en}
+  - {url: "https://www.getnet.net/en/our-solutions/omnichannel", tags: [institucional, global], language: en}
+  - {url: "https://www.getnet.net/en/our-solutions/value-added-solutions", tags: [institucional, global], language: en}
+  - {url: "https://www.getnet.net/en/our-solutions/agentic-commerce", tags: [institucional, global], language: en}
+  - {url: "https://www.getnet.net/en/corporate/about-us", tags: [institucional, global], language: en}
+  # --- Getnet Brasil -----------------------------------------------------------------------
+  - {url: "https://site.getnet.com.br/", tags: [produtos], language: pt}
+  - {url: "https://site.getnet.com.br/pix/", tags: [produtos, pix], language: pt}
+  - {url: "https://site.getnet.com.br/pagamentos-pelo-whatsapp", tags: [produtos, whatsapp], language: pt}
+  - {url: "https://www.santander.com.br/getnet", tags: [produtos, maquininhas, antecipacao], language: pt}
+  - {url: "https://www.santander.com.br/empresas/getnet/pix", tags: [produtos, pix], language: pt}
+  - {url: "https://www.santander.com.br/blog/seus-negocios/link-de-pagamento/", tags: [produtos, link-de-pagamento], language: pt}
+  - {url: "https://www.santander.com.br/blog/pix-na-maquina-getnet", tags: [produtos, pix], language: pt}
+  - {url: "https://www.santander.com.br/blog/seus-negocios/ativar-get-tap/", tags: [produtos, get-tap], language: pt}
+  - {url: "https://www.santander.com.br/blog/seus-negocios/ativacao-maquininha-getnet/", tags: [suporte, ativacao], language: pt}
+  - {url: "https://www.santander.com.br/blog/seus-negocios/whatsapp-business-na-getnet/", tags: [produtos, whatsapp], language: pt}
+  # --- Official manuals (PDF) ----------------------------------------------------------------
+  - {url: "https://site.getnet.com.br/wp-content/uploads/2025/09/Manul-GetSmart.pdf", tags: [suporte, manual, get-smart], language: pt}
+  - {url: "https://site.getnet.com.br/wp-content/uploads/2024/01/Manul_GetMini.pdf", tags: [suporte, manual, get-mini], language: pt}
+  - {url: "https://site.getnet.com.br/wp-content/uploads/2026/07/getnet_19_06-26_Manul_GetLite_V4-1.pdf", tags: [suporte, manual], language: pt}
+  - {url: "https://site.getnet.com.br/wp-content/uploads/2024/09/Folder_Credirio.pdf", tags: [produtos, crediario], language: pt}
