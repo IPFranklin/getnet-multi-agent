@@ -59,7 +59,10 @@ UNSUPPORTED_TERMS = [
 GENERAL_QUESTION = [
     r"^\s*(do i need|is it necessary|preciso (ter|de)|e necessario|how does|how do|como funciona|what is|what are|"
     r"o que e|can i|posso|how many|quantas|quantos|qual a diferenca|what'?s the difference|necesito|puedo|que es)\b",
-    r"^\s*(como|how (do|can) i) (ativo|ativar|habilito|habilitar|configuro|configurar|activate|set up|enable)\b",
+    # "How do I activate Pix?" is general; "How do I activate MY machine?" needs the merchant's terminals
+    # (product decision on case kb-07-pt: route to support).
+    r"^\s*(como|how (do|can) i) (ativo|ativar|habilito|habilitar|configuro|configurar|activate|set up|enable)\b"
+    r"(?!.*\b(minha|meu|minhas|meus|my)\b)",
 ]
 VAGUE = [r"^\s*(help|ajuda|socorro|oi|ola|hi|hello|hey|ayuda|problema|it'?s not working|n[aã]o funciona)\s*[!?.]*\s*$"]
 

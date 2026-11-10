@@ -24,6 +24,9 @@ EXAMPLES = [
     ("Quanto eu recebi ontem?", "support"),
     ("What did I receive yesterday?", "support"),
     ("Como funciona a antecipação de recebíveis?", "knowledge"),
+    # Product decision (kb-07-pt): activating *my* machine is support; activating a feature is knowledge
+    ("Como ativo minha maquininha?", "support"),
+    ("Como ativo o Pix?", "knowledge"),
 ]
 
 
