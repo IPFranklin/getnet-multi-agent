@@ -149,8 +149,13 @@ class MerchantRepository:
         n = rng.randint(8, 14) if day.weekday() < 6 else rng.randint(4, 8)
         is_today = day == self._today()
         txs = []
+        # Only generate methods the merchant can actually accept (e.g. no Pix when Pix is disabled):
+        # the real Claude caught this inconsistency in the mock and correctly escalated to a human.
+        methods, weights = ["pix", "debit", "credit_1x", "credit_installments"], [35, 35, 20, 10]
+        if not m["pix"]["enabled"]:
+            methods, weights = methods[1:], weights[1:]
         for i in range(n):
-            method = rng.choices(["pix", "debit", "credit_1x", "credit_installments"], [35, 35, 20, 10])[0]
+            method = rng.choices(methods, weights)[0]
             inst = rng.randint(2, 6) if method == "credit_installments" else 1
             amount = round(rng.uniform(12, 90) * (3 if inst > 1 else 1), 2)
             hour = rng.randint(7, 11 if is_today else 20)

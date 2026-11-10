@@ -37,6 +37,15 @@ def test_data_is_deterministic(repository):
     assert a == b and any(t["status"] == "declined" for t in a)
 
 
+def test_no_pix_sales_for_merchants_without_pix(repository):
+    # Regression: the real Claude flagged Pix sales for a merchant whose Pix is disabled and escalated.
+    from datetime import timedelta
+    txs = repository.list_transactions("cliente2024", FIXED_TODAY - timedelta(days=20), FIXED_TODAY, limit=500)
+    assert txs and all(t["method"] != "pix" for t in txs)
+    assert any(t["method"] == "pix" for t in repository.list_transactions(
+        "cliente1988", FIXED_TODAY - timedelta(days=20), FIXED_TODAY, limit=500))
+
+
 def test_error_code_lookup():
     assert lookup("51")["who"] == "issuer"
     assert lookup("código 05")["meaning"].startswith("Not authorized")
