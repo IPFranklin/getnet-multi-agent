@@ -5,7 +5,8 @@ Runs a labelled dataset through the system and computes:
   * tool recall                — expected tools ⊆ tools actually called
   * grounding rate             — answers that should cite sources do
   * keyword coverage           — each "any-of" keyword group appears in the answer
-  * safety                     — forbidden strings (e.g. raw PAN) never appear
+  * safety                     — forbidden strings (e.g. raw PAN, "Correction") never appear
+  * multi-turn cases           — "turns" are sent first in the same session, then the scored message
   * latency p50 / p95, error rate
   * (optional --judge) LLM-as-judge 1-5 scores for relevance and faithfulness to sources
 
@@ -32,9 +33,12 @@ ROOT = Path(__file__).resolve().parent
 JUDGE_PROMPT = """You are grading a customer-support answer for Getnet (payments company).
 Question: {question}
 Answer: {answer}
-Sources available to the assistant: {sources}
-Score 1-5 for RELEVANCE (does it answer the question?) and FAITHFULNESS (no claims beyond the sources/tool data;
-5 = fully grounded). Reply ONLY with JSON: {{"relevance": n, "faithfulness": n, "comment": "..."}}"""
+Sources listed to the customer (ref = the [n] used in the answer): {sources}
+Evidence the assistant actually received from its tools (retrieved passages, account data, API results):
+{evidence}
+Score 1-5 for RELEVANCE (does it answer the question?) and FAITHFULNESS (every factual claim is supported by
+the evidence above; citations [n] point to the right source; 5 = fully grounded). Judge only against the
+evidence shown. Reply ONLY with JSON: {{"relevance": n, "faithfulness": n, "comment": "..."}}"""
 
 
 def load_dataset(path: Path, tags: set[str] | None) -> list[dict]:
@@ -42,15 +46,25 @@ def load_dataset(path: Path, tags: set[str] | None) -> list[dict]:
     return [r for r in rows if not tags or tags & set(r.get("tags", []))]
 
 
-async def run_case_inprocess(orchestrator, case: dict) -> dict:
-    return await orchestrator.handle(case["message"], case["user_id"], session_id=f"eval-{case['id']}")
+def _session(case: dict, run_id: str) -> str:
+    return f"eval-{run_id}-{case['id']}"
 
 
-async def run_case_http(client: httpx.AsyncClient, url: str, case: dict) -> dict:
-    resp = await client.post(f"{url}/chat", json={"message": case["message"], "user_id": case["user_id"],
-                                                  "session_id": f"eval-{case['id']}"})
-    resp.raise_for_status()
-    return resp.json()
+async def run_case_inprocess(orchestrator, case: dict, run_id: str) -> dict:
+    # Multi-turn cases: earlier turns ("turns") are sent first in the same session, then the scored message.
+    for turn in case.get("turns", []):
+        await orchestrator.handle(turn, case["user_id"], session_id=_session(case, run_id))
+    return await orchestrator.handle(case["message"], case["user_id"], session_id=_session(case, run_id))
+
+
+async def run_case_http(client: httpx.AsyncClient, url: str, case: dict, run_id: str) -> dict:
+    out: dict = {}
+    for msg in [*case.get("turns", []), case["message"]]:
+        resp = await client.post(f"{url}/chat", json={"message": msg, "user_id": case["user_id"],
+                                                      "session_id": _session(case, run_id)})
+        resp.raise_for_status()
+        out = resp.json()
+    return out
 
 
 def score_case(case: dict, out: dict) -> dict:
@@ -71,14 +85,17 @@ def score_case(case: dict, out: dict) -> dict:
         "latency_ms": out.get("latency_ms", 0.0),
         "answer": answer,
         "sources": out.get("sources", []),
+        "evidence": out.get("evidence", []),
     }
 
 
 async def judge(model, case: dict, result: dict) -> dict:
     from langchain_core.messages import HumanMessage
 
+    evidence = "\n\n".join(f"<{e['tool']}>\n{e['output']}" for e in result.get("evidence", [])) or "(none returned)"
     prompt = JUDGE_PROMPT.format(question=case["message"], answer=result["answer"][:3000],
-                                 sources=json.dumps(result["sources"], ensure_ascii=False)[:2000])
+                                 sources=json.dumps(result["sources"], ensure_ascii=False)[:2000],
+                                 evidence=evidence[:8000])
     msg = await model.ainvoke([HumanMessage(content=prompt)])
     text = msg.content if isinstance(msg.content, str) else "".join(b.get("text", "") for b in msg.content if isinstance(b, dict))
     try:
@@ -115,7 +132,9 @@ def write_report(summary: dict, results: list[dict], provider: str) -> Path:
     out_dir = ROOT / "reports"
     out_dir.mkdir(exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    (out_dir / f"report-{stamp}.json").write_text(json.dumps({"summary": summary, "results": results}, ensure_ascii=False, indent=2))
+    (out_dir / f"report-{stamp}.json").write_text(
+        json.dumps({"summary": summary, "results": results}, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     lines = [f"# Evaluation report — {stamp} (provider: {provider})", "", "| metric | value |", "|---|---|"]
     lines += [f"| {k} | {v} |" for k, v in summary.items()]
     lines += ["", "| case | agent | route | tools | grounded | keywords | safe | latency ms |", "|---|---|---|---|---|---|---|---|"]
@@ -144,17 +163,19 @@ async def main() -> int:
     settings = get_settings()
     results = []
     t0 = time.perf_counter()
+    run_id = datetime.now().strftime("%H%M%S")  # fresh sessions on every run (memory is per session)
     if args.url:
         async with httpx.AsyncClient(timeout=120) as client:
-            outs = [await run_case_http(client, args.url, c) for c in cases]
+            outs = [await run_case_http(client, args.url, c, run_id) for c in cases]
     else:
         from app.container import build_container
         from app.graph import Orchestrator
         from app.observability import configure_logging
 
         configure_logging("WARNING")
+        settings.expose_trace = True  # the judge needs the tool evidence
         orchestrator = Orchestrator(build_container(settings))
-        outs = [await run_case_inprocess(orchestrator, c) for c in cases]
+        outs = [await run_case_inprocess(orchestrator, c, run_id) for c in cases]
 
     judge_model = None
     if args.judge and settings.llm_provider != "fake":
