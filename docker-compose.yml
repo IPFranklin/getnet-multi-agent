@@ -14,6 +14,9 @@ services:
     environment:
       EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-fastembed}
       LLM_PROVIDER: ${LLM_PROVIDER:-fake}
+      # First start builds the index from the curated docs AND the live URLs in data/sources.yaml.
+      # Unreachable URLs are skipped (logged as crawled_docs fetched < requested). Set to false for offline runs.
+      INGEST_CRAWL: ${INGEST_CRAWL:-true}
     volumes:
       - agent-data:/app/data/runtime   # tickets & handoffs survive restarts
       - agent-index:/app/data/index    # built knowledge index
