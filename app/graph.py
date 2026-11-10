@@ -125,12 +125,17 @@ class Orchestrator:
             trace_id_var.reset(token)
 
     @staticmethod
-    def _unique_sources(sources: list[dict], limit: int = 5) -> list[dict]:
+    def _unique_sources(sources: list[dict], limit: int = 10) -> list[dict]:
+        """Sources in citation order: ``ref`` n matches the ``[n]`` markers in the answer.
+
+        The tools already de-duplicate by URL and number sources in order of appearance
+        (see ``ToolContext.add_sources``), so the position here *is* the citation number.
+        """
         seen, out = set(), []
         for x in sources:
             if x["url"] not in seen:
                 seen.add(x["url"])
-                out.append({"title": x["title"], "url": x["url"]})
+                out.append({"ref": len(out) + 1, "title": x["title"], "url": x["url"]})
         return out[:limit]
 
     def _to_response(self, s: GraphState, trace_id: str, elapsed: float) -> dict:
@@ -150,6 +155,9 @@ class Orchestrator:
         }
         if self.c.settings.expose_trace:
             body["trace"] = s.get("steps", [])
+            # What the specialists actually saw (truncated tool outputs) — lets the eval judge check
+            # faithfulness against evidence instead of just source titles. Debug/eval only.
+            body["evidence"] = [{"tool": t["tool"], "output": t.get("output", "")} for t in s.get("tools_used", [])]
         if s.get("errors"):
             body["errors"] = s["errors"]
         return body

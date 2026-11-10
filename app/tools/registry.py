@@ -11,7 +11,7 @@ orchestrator turns into structured fields of the API response.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
 
 from langchain_core.tools import BaseTool, StructuredTool
@@ -30,12 +30,23 @@ class ToolContext:
     handoff_reason: str | None = None
     tickets: list[dict] = field(default_factory=list)
 
-    def add_sources(self, items: list[dict]) -> None:
-        seen = {(s["url"], s.get("section")) for s in self.sources}
+    def add_sources(self, items: list[dict]) -> list[int]:
+        """Register sources and return their citation numbers.
+
+        Sources are de-duplicated by URL and numbered in order of first appearance, so the
+        ``[n]`` the model sees in a passage is exactly the position of that source in the
+        ``sources`` list returned by the API — even across several searches in one turn.
+        """
+        refs = []
         for s in items:
-            if (s["url"], s.get("section")) not in seen:
+            for i, existing in enumerate(self.sources):
+                if existing["url"] == s["url"]:
+                    refs.append(i + 1)
+                    break
+            else:
                 self.sources.append(s)
-                seen.add((s["url"], s.get("section")))
+                refs.append(len(self.sources))
+        return refs
 
 
 def _dump(obj: object) -> str:
@@ -99,8 +110,8 @@ class EscalateArgs(BaseModel):
 def build_knowledge_tools(retriever: KnowledgeRetriever, settings: Settings, ctx: ToolContext) -> list[BaseTool]:
     async def search_kb(query: str) -> str:
         chunks = retriever.retrieve(query)
-        ctx.add_sources([c.as_source() for c in chunks])
-        return KnowledgeRetriever.format_context(chunks)
+        refs = ctx.add_sources([c.as_source() for c in chunks])
+        return KnowledgeRetriever.format_context([replace(c, ref=r) for c, r in zip(chunks, refs, strict=True)])
 
     async def search_web(query: str) -> str:
         out = await web_tools.web_search(query, settings)
@@ -129,7 +140,8 @@ def build_knowledge_tools(retriever: KnowledgeRetriever, settings: Settings, ctx
             coroutine=search_kb, name="search_getnet_knowledge_base", args_schema=KBQuery,
             description="Search Getnet's official knowledge base (products, card machines, fees policy, Pix, "
                         "antecipação, crediário, payment link, WhatsApp, manuals, troubleshooting). ALWAYS use for any "
-                        "question about Getnet. Returns numbered passages [n] with URLs to cite.",
+                        "question about Getnet. Returns passages tagged [n]; n is the source number to cite "
+                        "(stable across searches in the same answer).",
         ),
         StructuredTool.from_function(
             coroutine=search_web, name="web_search", args_schema=WebQuery,
@@ -184,8 +196,8 @@ def build_support_tools(
 
     async def help_center(query: str) -> str:
         chunks = retriever.retrieve(query)
-        ctx.add_sources([c.as_source() for c in chunks])
-        return KnowledgeRetriever.format_context(chunks)
+        refs = ctx.add_sources([c.as_source() for c in chunks])
+        return KnowledgeRetriever.format_context([replace(c, ref=r) for c, r in zip(chunks, refs, strict=True)])
 
     async def ticket(category: str, summary: str, priority: str = "medium") -> str:
         t = desk.open_ticket(user_id, category, summary, priority)

@@ -19,6 +19,7 @@ from langchain_core.tools import BaseTool
 from app.observability import TOOL_CALLS, log_event, record_usage
 
 logger = logging.getLogger(__name__)
+EVIDENCE_CHARS = 1500  # tool output kept per call for traces / eval judge (not sent to customers)
 
 
 def message_text(msg: BaseMessage) -> str:
@@ -28,13 +29,24 @@ def message_text(msg: BaseMessage) -> str:
     return str(content).strip()
 
 
-def history_to_messages(history: list[dict]) -> list[BaseMessage]:
+def history_to_messages(history: list[dict], current_agent: str | None = None) -> list[BaseMessage]:
+    """Convert stored turns into chat messages, keeping track of *who* answered.
+
+    All specialists share one conversation memory. Without attribution, a specialist reads another
+    agent's reply as if it had written it — e.g. the Knowledge agent "corrects" account figures that
+    only the Support agent could see, and the two contradict each other on the next turn. Replies from
+    a different agent are therefore labelled; the prompts tell each specialist how to treat them.
+    """
     out: list[BaseMessage] = []
     for turn in history:
         if turn["role"] == "user":
             out.append(HumanMessage(content=turn["content"]))
-        else:
-            out.append(AIMessage(content=turn["content"]))
+            continue
+        agent = turn.get("agent")
+        content = turn["content"]
+        if agent and agent != current_agent:
+            content = f"[Earlier reply by the {agent} specialist]\n{content}"
+        out.append(AIMessage(content=content))
     return out
 
 
@@ -57,7 +69,7 @@ async def run_tool_agent(
 ) -> AgentRun:
     by_name = {t.name: t for t in tools}
     bound = model.bind_tools(tools)
-    messages: list[BaseMessage] = [SystemMessage(content=system_prompt), *history_to_messages(history),
+    messages: list[BaseMessage] = [SystemMessage(content=system_prompt), *history_to_messages(history, agent_name),
                                    HumanMessage(content=user_message)]
     records: list[dict] = []
 
@@ -84,7 +96,8 @@ async def run_tool_agent(
             ms = round((time.perf_counter() - start) * 1000, 1)
             TOOL_CALLS.labels(agent=agent_name, tool=tc["name"], status=status).inc()
             log_event(logger, "tool_called", agent=agent_name, tool=tc["name"], args=tc["args"], status=status, latency_ms=ms)
-            records.append({"agent": agent_name, "tool": tc["name"], "args": tc["args"], "status": status, "latency_ms": ms})
+            records.append({"agent": agent_name, "tool": tc["name"], "args": tc["args"], "status": status, "latency_ms": ms,
+                            "output": str(content)[:EVIDENCE_CHARS]})
             return ToolMessage(content=str(content), tool_call_id=tc["id"], name=tc["name"])
 
         # independent tool calls in the same turn run concurrently

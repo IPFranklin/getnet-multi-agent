@@ -28,6 +28,7 @@ class ChatRequest(BaseModel):
 
 
 class Source(BaseModel):
+    ref: int | None = Field(default=None, description="Citation number used as [n] in the response text.")
     title: str
     url: str
 
@@ -51,6 +52,7 @@ class ChatResponse(BaseModel):
     latency_ms: float
     llm_provider: str
     trace: list[dict] | None = None
+    evidence: list[dict] | None = None
     errors: list[str] | None = None
 
 
