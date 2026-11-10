@@ -54,7 +54,10 @@ docker compose up --build
 
 The first start **crawls the challenge URLs** (`data/sources.yaml`) in addition to the curated knowledge base,
 so it takes a little longer; the index is then kept in a Docker volume. Unreachable pages are skipped and
-logged (`crawled_docs requested=… fetched=…`). Run offline with `INGEST_CRAWL=false`; rebuild the index with
+logged (`crawled_docs requested=… fetched=…`). Measured on 2026-11-09: **11 of 21 URLs ingested** (all
+getnet.net/en pages, Pix and three PDF manuals → 20 documents, 141 chunks). The others were skipped with a
+logged reason: 7 santander.com.br pages return 403 to automated clients, 1 manual URL is now 404, and 2
+site.getnet.com.br pages render their content with JavaScript. The curated knowledge base covers those topics. Run offline with `INGEST_CRAWL=false`; rebuild the index with
 `docker compose run --rm ingest` or `docker compose down -v`.
 
 > Gotchas seen on Windows: a variable left in the terminal (e.g. `$env:EMBEDDING_BACKEND="hash"`) overrides
@@ -80,7 +83,7 @@ docker compose run --rm tests    # run the test-suite inside the image
 
 ```bash
 pip install -r requirements-dev.txt
-make test          # 103 tests, fully offline (~3 s)
+make test          # 106 tests, fully offline (~3 s)
 make run           # uvicorn with reload on :8000
 make evals         # evaluation harness (uses your .env: fake or real LLM)
 make ingest        # crawl live sources + rebuild the index
@@ -315,7 +318,7 @@ partial answer is kept and the handoff message is appended. Operators can list c
 ## 9. Testing strategy
 
 ```
-make test     # 103 tests, ~3 s, no network, no API keys — 91 % line coverage
+make test     # 106 tests, ~3 s, no network, no API keys — 91 % line coverage
 ```
 
 The test pyramid mirrors the architecture, and everything runs **offline and deterministically**: the LLM is a
@@ -368,18 +371,28 @@ computes:
 
 It writes a Markdown + JSON report to `evals/reports/` and can be used as a CI gate.
 
-**Measured results.** The real-LLM run is from 2026-10-30, **before** the fixes in §14 (Claude Haiku as
-router, Claude Sonnet as agent, fastembed, Docker on Windows); the fake run is the current code.
+**Measured results** (real runs: Claude Haiku as router, Claude Sonnet as agents, fastembed, Docker on Windows,
+index with the crawled URLs):
 
-| Metric | Fake LLM (current code, 28 cases) | Real Claude (2026-10-30, 25 cases) |
-|---|---|---|
-| Routing accuracy | 100 % | 96 % (1 case with an ambiguous label, see §14) |
-| Tool recall | 100 % | 96 % |
-| Keyword coverage | 89 % | 100 % |
-| Safety | 100 % | 100 % |
-| Latency p50 / p95 | 7 ms / 260 ms | 5.7 s / 10.6 s |
-| Judge relevance (1–5) | – | 4.89 |
-| Judge faithfulness (1–5) | – | 2.72 → **root-caused**: the judge only saw source titles, and citation numbers could point to missing sources. Both fixed (§14); re-run pending |
+| Metric | Real Claude, 2026-10-30 (before §14 fixes, 25 cases) | **Real Claude, 2026-11-09 (current code, 28 cases)** | Fake LLM (current code) |
+|---|---|---|---|
+| Routing accuracy | 96 % | **100 %** | 100 % |
+| Tool recall | 96 % | **100 %** | 100 % |
+| Grounding (sources when expected) | 100 % | **100 %** | 93 % ¹ |
+| Keyword coverage | 100 % | **100 %** | 89 % ¹ |
+| Safety | 100 % | **100 %** | 100 % |
+| Error rate | 0 % | **0 %** | 0 % |
+| Latency p50 / p95 | 5.7 s / 10.6 s | **5.8 s / 9.8 s** | 7 ms / 260 ms |
+| Judge relevance (1–5) | 4.89 | **4.90** | – |
+| Judge faithfulness (1–5) | 2.72 | **4.10** (19 of 21 judged answers scored 4–5) | – |
+
+¹ Offline, the weather/FX cases need internet access, and the fake model only pastes passages.
+
+Faithfulness went from 2.7 to 4.1 after fixing citation numbering and giving the judge the real evidence
+(§14). The two answers still at 3/5 are instructive: in one, the payout schedule exceeded the evidence window the
+judge receives (4,000 chars per tool call), so it could not verify correct figures; in the other, the judge
+penalised a caveat the system prompt *requires* ("rates may vary by plan, volume and date"). Next step: give the
+judge the relevant system-prompt rules and structured (not truncated) tool data.
 
 Offline, the two weather/FX cases need internet access to pass the grounding check. Next steps: grow the dataset from
 real anonymised conversations (thumbs-down + handoffs are the best source), add RAG-specific metrics
@@ -470,7 +483,7 @@ data/
   knowledge_base/*.md     curated Getnet knowledge (with source URLs)
   sources.yaml            live URLs + PDF manuals to crawl
 evals/                    dataset.jsonl + run_evals.py
-tests/                    unit/ + integration/ (103 tests)
+tests/                    unit/ + integration/ (106 tests)
 scripts/                  demo.sh · demo.ps1 · ask.ps1 · check_key.py (API key diagnostics)
 Dockerfile · docker-compose.yml · Makefile · .github/workflows/ci.yml
 ```
@@ -517,19 +530,19 @@ measures what the dataset asks. Each fix below has its own commit and a regressi
 | 1 | Every LLM call failed with HTTP 400 | The client sent `temperature`, which newer Claude models reject | **Fixed** — sent only when configured |
 | 2 | In one conversation, the Knowledge agent "corrected" account figures given by the Support agent, and they kept contradicting each other | Shared memory without saying which agent wrote each reply | **Fixed** — replies labelled by agent + prompt rules; multi-turn eval case |
 | 3 | Citations like "[4]" pointing to nothing | Passages numbered per search, API sources de-duplicated by URL | **Fixed** — one numbering per request; `sources[].ref` |
-| 4 | Judge faithfulness 2.7/5 on correct answers | The judge saw only source titles, not the evidence | **Fixed** — judge receives tool evidence |
+| 4 | Judge faithfulness 2.7/5 on correct answers | The judge saw only source titles, not the evidence or the earlier turns | **Fixed** — judge receives tool evidence and conversation history (4.1/5 now) |
 | 5 | "Quanto vou receber hoje?" routed to Knowledge when the LLM router was unavailable | Fallback keyword rules required "minha/my" | **Fixed** — new patterns + regression tests |
 | 6 | "Write a poem about cats" refused in Portuguese | Fallback language detection defaulted to `pt` on unknown words | **Fixed** |
 | 7 | "Who won the 2022 World Cup?" answered via web search | The challenge asks for general questions; a production assistant would restrict scope | **Product decision** — kept as the challenge requires; restrict in the router for production |
 | 8 | A question about *avoiding* card cloning could be blocked as fraud | Pattern-based guardrail favours recall | **Known limitation** — add a small classifier and measure false positives |
-| 9 | Answers longer than a chat channel needs | Prompt style | **Product decision** — length per channel, validated by A/B on cost per resolved conversation |
+| 9 | Answers longer than a chat channel needs; support answers added generic tips not in the manuals | Prompt style and grounding rules | **Grounding fixed** (steps must come from the passages, cited [n]); length per channel stays a product decision, validated by A/B on cost per resolved conversation |
 | 10 | Failures on Windows outside Docker | No system time-zone database; report written without UTF-8 | **Fixed** — `tzdata`, UTF-8 reports |
-| 11 | "Como ativo minha maquininha?" labelled knowledge, routed to support by Claude | Ambiguous label (how-to vs. this merchant's device) | **Product decision** on the label |
+| 11 | "Como ativo minha maquininha?" labelled knowledge, routed to support by Claude (twice, with a better answer) | Ambiguous label (how-to vs. this merchant's device) | **Decided: support** — "my machine" needs account context; "how do I activate Pix?" stays knowledge. Label and fallback router aligned |
 | 12 | Some off-topic passages retrieved (e.g. Pix question) | Small corpus, no reranker | **Known limitation** — reranker / relevance floor tuning |
 | 13 | No per-user rate limit or token budget | Auth and quotas assumed upstream | **Known limitation** — quotas, cheap pre-filter, cost alerts |
 | 14 | When the LLM was down, 100 % of questions became human handoffs, with no alert | Graceful degradation works, but nobody would notice | **Known limitation** — alert on fallback/handoff rate (§10) |
-
-Also found and documented: the URL crawler existed but was off by default — it is now on in Docker.
+| 15 | A merchant with Pix disabled had Pix sales; the Support agent spotted the contradiction and escalated to a human | Bug in our **mock data**, not in the agent — the agent did exactly what its prompt asks for inconsistent data | **Fixed** in the mock + regression test |
+| 16 | A required feature was present but not active: the URL crawler was off by default | Default configuration | **Fixed** — on in Docker; measured 11/21 URLs ingested (see §1) |
 
 ## 15. How this project was built
 
@@ -543,6 +556,9 @@ This repository was built with an AI coding assistant (Claude) from the challeng
   with a regression test or eval case. The commit history follows that order (baseline → one commit per fix).
 - What I would do differently from the start: write the evaluation dataset (including multi-turn and
   adversarial cases) **before** the code, and test with the real model from day one.
+- A lesson I did not expect: reading the judge's comments was as useful as the scores. They showed which
+  low scores were measurement problems (truncated evidence, missing history) and which were real ones, and one
+  "failure" turned out to be the agent correctly catching an error in our own test data.
 
 ## 16. Product view: running it as the business owner
 
